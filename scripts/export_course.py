@@ -158,6 +158,26 @@ def _send_pdf_email(subject: str,
     with _smtp_connect() as server:
         server.sendmail(config.SMTP_EMAIL, config.RECEIVER_EMAIL, msg.as_string())
 
+def _send_md_email(subject: str, md_content: list[tuple[bytes, str]]) -> None:
+    """Send an email with Markdown content.
+
+    Args:
+        md_content: List of ``(md_bytes, filename)`` tuples.
+    """
+    msg = MIMEMultipart()
+    msg["Subject"] = subject
+    msg["From"] = formataddr(("iCourse Subscriber", config.SMTP_EMAIL))
+    msg["To"] = config.RECEIVER_EMAIL
+
+    for md_bytes, filename in md_content:
+        part = MIMEBase("text", "markdown", name=filename)
+        part.set_payload(md_bytes)
+        encoders.encode_base64(part)
+        part.add_header("Content-Disposition", "attachment", filename=filename)
+        msg.attach(part)
+
+    with _smtp_connect() as server:
+        server.sendmail(config.SMTP_EMAIL, config.RECEIVER_EMAIL, msg.as_string())
 
 def _safe_filename(title: str) -> str:
     """Sanitise a course title for use as a filename."""
@@ -225,6 +245,11 @@ def main():
         help="Export as PDF attachment instead of inline HTML email",
     )
     parser.add_argument(
+        "--md",
+        action="store_true",
+        help="Export as Markdown attachment instead of HTML email (experimental)",
+    )
+    parser.add_argument(
         "--db", default="data/icourse.db",
         help="Database path (default: data/icourse.db)",
     )
@@ -283,6 +308,33 @@ def main():
         total_bytes = sum(len(b) for b, _ in attachments)
         print(f"Sending email with {len(attachments)} PDF(s) ({total_bytes} bytes)...")
         _send_pdf_email(subject, attachments)
+        print(f"[OK] Sent: {subject}")
+
+    elif args.md:
+        # Markdown mode: one MD file per course, all files in one email
+        attachments: list[tuple[bytes, str]] = []
+        titles: list[str] = []
+        for cid in course_ids:
+            result = _query_course(db, cid, sub_ids=sub_ids)
+            if result is None:
+                continue
+            course_title, teacher, lectures = result
+            titles.append(course_title)
+
+            markdown:str = _build_plain(course_title, teacher, lectures, pdf=True)
+            markdown_bytes = markdown.encode("utf-8")
+            filename = f"{_safe_filename(course_title)}_summaries.md"
+            attachments.append((markdown_bytes, filename))
+            print(f"  Markdown ready ({len(markdown_bytes)} bytes): {filename}")
+
+        if not attachments:
+            print("No courses with summaries found – nothing to send.")
+            sys.exit(0)
+
+        subject = "[iCourse 课程摘要导出] " + ", ".join(titles)
+        total_bytes = sum(len(b) for b, _ in attachments)
+        print(f"Sending email with {len(attachments)} MD(s) ({total_bytes} bytes)...")
+        _send_md_email(subject, attachments)
         print(f"[OK] Sent: {subject}")
 
     else:

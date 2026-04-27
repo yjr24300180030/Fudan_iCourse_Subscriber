@@ -12,6 +12,11 @@ on:
         required: false
         type: boolean
         default: false
+      export_md:
+        description: "Export as Markdown attachment (uncheck to send as HTML email)"
+        required: false
+        type: boolean
+        default: false
       sub_ids:
         description: "Optional comma-separated lecture sub_ids to filter (default: all summarized lectures)"
         required: false
@@ -86,10 +91,15 @@ jobs:
           RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
           EXPORT_COURSE_ID: ${{ inputs.course_id }}
           EXPORT_SUB_IDS: ${{ inputs.sub_ids }}
+          EXPORT_MD: ${{ inputs.export_md }}
         run: |
           PDF_FLAG=""
+          MD_FLAG=""
           if [ "${{ inputs.export_pdf }}" = "true" ]; then
             PDF_FLAG="--pdf"
+          fi
+          if [ "${{ inputs.export_md }}" = "true" ]; then
+            MD_FLAG="--md"
           fi
           if [ -n "$EXPORT_SUB_IDS" ]; then
             python scripts/export_course.py --course-id "$EXPORT_COURSE_ID" --sub-ids "$EXPORT_SUB_IDS" $PDF_FLAG
