@@ -2,6 +2,7 @@
 
 import os
 import sqlite3
+import threading
 from datetime import datetime
 
 from . import config
@@ -13,13 +14,23 @@ from .schema import (
 
 
 class Database:
-    """SQLite database for course and lecture tracking."""
+    """SQLite database for course and lecture tracking.
+
+    Thread safety: ``check_same_thread=False`` lets OCR worker threads share
+    one connection.  The plain sqlite3 wrapper is *not* internally
+    thread-safe at the cursor level, so every concurrently-callable method
+    (``update_ppt_page`` / ``update_ppt_page_dhash``) acquires ``self._lock``
+    before touching ``self.conn``.  All other methods are only called from
+    the main thread (between or before/after worker dispatches), so they
+    skip the lock to keep the read path cheap.
+    """
 
     def __init__(self, db_path: str | None = None):
         self.db_path = db_path or config.DB_PATH
         os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
-        self.conn = sqlite3.connect(self.db_path)
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        self._lock = threading.Lock()
         self._init_tables()
 
     def _init_tables(self):
@@ -166,8 +177,11 @@ class Database:
         'done' | 'failed' | 'dedup_dropped' | 'invalid'. ``get_done_ppt_pages``
         only surfaces 'done', so dropped/invalid pages naturally vanish from
         the prompt.
+
+        Thread-safe: the OCR pool workers all hit this method, so the write
+        is serialised on ``self._lock``.
         """
-        with self.conn:
+        with self._lock, self.conn:
             self.conn.execute(
                 """UPDATE ppt_pages
                    SET text = ?, ocr_status = ?, ocr_at = ?
@@ -182,8 +196,11 @@ class Database:
         Called between download and OCR so the dedup pass has dhashes for
         every successfully-downloaded page in one place. ``dhash`` may be
         None when image decode fails (treated as 'no dedup signal').
+
+        Locked even though only the main thread normally writes here, so
+        a future caller from another thread doesn't silently race.
         """
-        with self.conn:
+        with self._lock, self.conn:
             self.conn.execute(
                 "UPDATE ppt_pages SET dhash = ? WHERE sub_id = ? AND page_num = ?",
                 (dhash, sub_id, page_num),
