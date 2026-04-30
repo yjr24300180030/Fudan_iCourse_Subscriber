@@ -167,7 +167,7 @@ def process_lecture(
                 print(f"    [WARN] Attempt {attempt}/{max_attempts}: {e}")
                 if attempt < max_attempts:
                     # Re-login and get fresh URL for retry
-                    client = _check_session(client)
+                    _check_session(client)
                     video_url = client.get_video_url(course_id, sub_id)
                     vpn_url, http_headers = client.get_stream_params(video_url)
                     print(f"    Retrying with fresh connection...")
@@ -263,7 +263,7 @@ def _resummarize_old_lectures(
         date = row.get("date", "")
         try:
             print(f"  -- Resummarize: {course_title} / {sub_title}")
-            client = _check_session(client)
+            _check_session(client)
             try:
                 _fetch_and_ocr_ppts(client, db, course_id, sub_id)
             except Exception as e:
@@ -320,13 +320,19 @@ def login_with_retry(max_attempts: int = 5) -> WebVPNSession:
                 raise
 
 
-def _check_session(client: ICourseClient) -> ICourseClient:
-    """Verify WebVPN session; re-login if expired. Returns (possibly new) client."""
+def _check_session(client: ICourseClient) -> None:
+    """Verify WebVPN session; re-login in place if expired.
+
+    Mutates ``client`` rather than returning a new one — every helper that
+    holds a reference (background OCR / image-prefetch threads, retry
+    closures) keeps using the same instance and automatically picks up the
+    refreshed cookies.
+    """
     if client.check_alive():
-        return client
+        return
     print("[Session] WebVPN session expired, re-logging in...")
-    vpn = login_with_retry()
-    return ICourseClient(vpn)
+    client.vpn = login_with_retry()
+    client._userinfo = None  # cached for the dead session, must re-fetch
 
 
 def run():
@@ -353,7 +359,7 @@ def run():
             print(f"\n{'─' * 50}")
             print(f"[Course] {course_id}")
 
-            client = _check_session(client)
+            _check_session(client)
             detail = client.get_course_detail(course_id)
             course_title = detail["title"]
             teacher = detail["teacher"]
@@ -410,7 +416,7 @@ def run():
                     lecture.get("sub_title", ""),
                     lecture.get("date", ""),
                 )
-                client = _check_session(client)
+                _check_session(client)
                 try:
                     summary = process_lecture(
                         client, db, transcriber, summarizer,
@@ -435,7 +441,7 @@ def run():
     # Upgrade pre-v2 (no PPT OCR) summaries before the email step so the user
     # sees the new content in the same digest.
     try:
-        client = _check_session(client)
+        _check_session(client)
         _resummarize_old_lectures(client, db, summarizer, email_items)
     except Exception:
         print("[Resummarize] phase errored:")
