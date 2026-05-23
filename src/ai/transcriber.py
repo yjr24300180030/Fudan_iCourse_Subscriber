@@ -38,9 +38,28 @@ SILENCE_GAP_THRESHOLD_SEC = 30 * 60  # 30 min of no speech → suspected cutoff
 
 
 class Transcriber:
-    """FireRed-ASR2-CTC transcriber with VAD segmentation."""
+    """Sherpa-onnx ASR transcriber with VAD segmentation.
 
-    def __init__(self):
+    Backend is chosen at construction by ``config.ASR_BACKEND``; pass
+    ``backend=`` explicitly to override.  Supports:
+      - ``firered``    sherpa-onnx-fire-red-asr2-ctc-* (single .onnx)
+      - ``sensevoice`` sherpa-onnx-sense-voice-*       (single .onnx)
+      - ``zipformer``  sherpa-onnx-zipformer-*         (encoder/decoder/joiner)
+    Each backend looks at ``config.ASR_MODEL_DIR`` (default determined by
+    the env var) for its files; the same VAD is used across backends.
+
+    Use Cases:
+      - Production: pick one backend via env, leave it for the run.
+      - A/B testing (scripts/test_prod_lecture.py): build N Transcribers
+        with different backend= kwargs, transcribe same audio, diff outputs.
+    """
+
+    def __init__(self, backend: Optional[str] = None,
+                 model_dir: Optional[str] = None,
+                 num_threads: Optional[int] = None):
+        self._backend = (backend or config.ASR_BACKEND).lower()
+        self._model_dir = model_dir or config.ASR_MODEL_DIR
+        self._num_threads = num_threads or config.ASR_NUM_THREADS
         self._recognizer = None
         self._vad = None
         self._vad_config = None
@@ -55,50 +74,100 @@ class Transcriber:
         if self._recognizer is not None:
             return
 
-        model_dir = config.ASR_MODEL_DIR
-        model_int8 = os.path.join(model_dir, "model.int8.onnx")
-        model_fp32 = os.path.join(model_dir, "model.onnx")
-        if os.path.isfile(model_int8):
-            model_path = model_int8
-        elif os.path.isfile(model_fp32):
-            model_path = model_fp32
+        backend = self._backend
+        if backend == "firered":
+            self._recognizer = self._init_firered()
+        elif backend == "sensevoice":
+            self._recognizer = self._init_sensevoice()
+        elif backend == "zipformer":
+            self._recognizer = self._init_zipformer()
         else:
-            raise FileNotFoundError(
-                f"FireRed ASR2 CTC model not found at '{model_int8}' or "
-                f"'{model_fp32}'. Download from "
-                f"https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models"
+            raise ValueError(
+                f"Unknown ASR_BACKEND={backend!r}; expected "
+                f"firered / sensevoice / zipformer"
             )
 
-        tokens_path = os.path.join(model_dir, "tokens.txt")
         vad_path = config.SILERO_VAD_PATH
-
-        for p, name in [(tokens_path, "tokens.txt"),
-                        (vad_path, "silero_vad.onnx")]:
-            if not os.path.isfile(p):
-                raise FileNotFoundError(
-                    f"{name} not found at '{p}'. Download from "
-                    f"https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models"
-                )
-
-        print(f"[Transcriber] Loading FireRed ASR2 CTC model from {model_path}...")
-        # num_threads=4 so ASR can use all CPU cores when no OCR work is
-        # active.  When the LectureRunner's ASR phase coincides with a PPT
-        # OCR phase, the Scheduler caps OCR concurrency (see
-        # ``set_asr_active``) so the two workloads time-share predictably
-        # instead of fighting for cycles via OS round-robin alone.
-        self._recognizer = sherpa_onnx.OfflineRecognizer.from_fire_red_asr_ctc(
-            model=model_path,
-            tokens=tokens_path,
-            num_threads=4,
-            debug=False,
-        )
-
+        if not os.path.isfile(vad_path):
+            raise FileNotFoundError(
+                f"silero_vad.onnx not found at '{vad_path}'. Download from "
+                f"https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models"
+            )
         self._vad_config = sherpa_onnx.VadModelConfig()
         self._vad_config.silero_vad.model = vad_path
         self._vad_config.silero_vad.min_silence_duration = 0.25
         self._vad_config.sample_rate = SAMPLE_RATE
         self._reset_vad()
-        print("[Transcriber] Model loaded.")
+        print(f"[Transcriber] Model loaded (backend={backend}, "
+              f"threads={self._num_threads}).")
+
+    def _resolve_first(self, dir_: str, candidates: list[str]) -> str:
+        """Return the first existing path in dir_ matching any candidate name."""
+        for name in candidates:
+            p = os.path.join(dir_, name)
+            if os.path.isfile(p):
+                return p
+        raise FileNotFoundError(
+            f"None of {candidates} found in {dir_}"
+        )
+
+    def _init_firered(self):
+        model_path = self._resolve_first(
+            self._model_dir, ["model.int8.onnx", "model.onnx"],
+        )
+        tokens_path = os.path.join(self._model_dir, "tokens.txt")
+        if not os.path.isfile(tokens_path):
+            raise FileNotFoundError(f"tokens.txt missing in {self._model_dir}")
+        print(f"[Transcriber] Loading FireRed ASR2 CTC from {model_path}...")
+        return sherpa_onnx.OfflineRecognizer.from_fire_red_asr_ctc(
+            model=model_path,
+            tokens=tokens_path,
+            num_threads=self._num_threads,
+            debug=False,
+        )
+
+    def _init_sensevoice(self):
+        model_path = self._resolve_first(
+            self._model_dir, ["model.int8.onnx", "model.onnx"],
+        )
+        tokens_path = os.path.join(self._model_dir, "tokens.txt")
+        if not os.path.isfile(tokens_path):
+            raise FileNotFoundError(f"tokens.txt missing in {self._model_dir}")
+        print(f"[Transcriber] Loading SenseVoice from {model_path}...")
+        return sherpa_onnx.OfflineRecognizer.from_sense_voice(
+            model=model_path,
+            tokens=tokens_path,
+            num_threads=self._num_threads,
+            use_itn=True,
+            debug=False,
+        )
+
+    def _init_zipformer(self):
+        # Zipformer ships three sibling files in a release: encoder, decoder,
+        # joiner.  Filenames vary slightly across releases (epoch-99 vs
+        # bilingual etc.), so glob the dir for the first match.
+        import glob
+        def find_one(pattern_list):
+            for pat in pattern_list:
+                hits = sorted(glob.glob(os.path.join(self._model_dir, pat)))
+                if hits:
+                    return hits[0]
+            raise FileNotFoundError(
+                f"No file matching {pattern_list} in {self._model_dir}"
+            )
+        enc = find_one(["encoder*.int8.onnx", "encoder*.onnx"])
+        dec = find_one(["decoder*.int8.onnx", "decoder*.onnx"])
+        joi = find_one(["joiner*.int8.onnx", "joiner*.onnx"])
+        tokens_path = os.path.join(self._model_dir, "tokens.txt")
+        if not os.path.isfile(tokens_path):
+            raise FileNotFoundError(f"tokens.txt missing in {self._model_dir}")
+        print(f"[Transcriber] Loading Zipformer from {self._model_dir}...")
+        return sherpa_onnx.OfflineRecognizer.from_transducer(
+            encoder=enc, decoder=dec, joiner=joi,
+            tokens=tokens_path,
+            num_threads=self._num_threads,
+            debug=False,
+        )
 
     def _reset_vad(self):
         """Re-create VAD to reset internal counters (prevents INT32 overflow)."""

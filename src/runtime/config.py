@@ -131,6 +131,18 @@ ASR_MODEL_DIR = os.environ.get(
 SENSEVOICE_MODEL_DIR = ASR_MODEL_DIR  # alias for any straggler imports
 SILERO_VAD_PATH = os.environ.get("SILERO_VAD_PATH", "silero_vad.onnx")
 
+# ASR backend selector — Transcriber dispatches on this.  When changing,
+# ASR_MODEL_DIR must point at a matching sherpa-onnx model bundle:
+#   firered    — sherpa-onnx-fire-red-asr2-ctc-* (CTC, single model.onnx)
+#   sensevoice — sherpa-onnx-sense-voice-* (multi-lang CTC, single model)
+#   zipformer  — sherpa-onnx-zipformer-* (transducer, encoder/decoder/joiner)
+ASR_BACKEND = os.environ.get("ASR_BACKEND", "firered").strip().lower()
+# Inference thread count.  4 fully saturates a 4-vCPU GitHub runner when
+# ASR is the only thing on the box.  When OCR overlaps, the Scheduler's
+# set_asr_active() caps OCR concurrency at OCR_MAX_TARGET_WHEN_ASR_ACTIVE
+# so the two workloads share predictably.
+ASR_NUM_THREADS = int(os.environ.get("ASR_NUM_THREADS", "4"))
+
 # ── Scheduler concurrency knobs.  All overridable via env. ────────────────
 # image_pool: image downloads are tiny and IO-bound, 20 saturates bandwidth
 # without hammering the iCourse server.
