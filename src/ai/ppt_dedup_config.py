@@ -46,6 +46,7 @@ INVALID_PAGE_PATTERNS: list[str] = [
     "icoursefudaneducn",                   # icourse.fudan.edu.cn URL
     "智慧教学资源平台使用规范",
     "教育部等九部门",
+    "欢迎使用eLearning",
     "加快推进教育数字化",
     "本科课程评教提醒",
     "请于期末考试前完成评教",
@@ -54,13 +55,15 @@ INVALID_PAGE_PATTERNS: list[str] = [
     "板书效果展示",
     "双屏效果展示",
     "课程录制exe",
+    "PowerPoint演示文稿",
+    "录像指南",
     "ev去噪",
     "录制完成桌面会生成",
     "推荐上传至elearning",
     "ppt演示者视图会影响录屏",
     # ── Type 3: Windows file explorer (full-screen) ──
     # Normalised breadcrumb: "此电脑>U盘(D:)>..." → "此电脑u盘"
-    "此电脑u盘",
+    "此电脑","改日期","全屏模式"
     "此电脑本地磁盘",
     # File-list column headers (normalised: "名称修改日期类型大小")
     "名称修改日期类型大小",
@@ -259,8 +262,8 @@ UI_NOISE_LINE_PATTERNS: list[str] = [
     r"^☆.{4,}.+$",
     # Document window title: "...docx - Word", "...pptx - PowerPoint",
     # also ".ppt[兼容模式]-PowerPoint" and ".ppt - PowerPoint"
-    r"^.*\.docx[- ].*Word$",
-    r"^.*\.pptx?[^-]*[- ]*PowerPoint$",
+    r"^.*\.docx[^-]*[-(（\s]*Word.*$",
+    r"^.*\.pptx?[^-]*[-(（\s]*PowerPoint.*$",
     # PPT placeholder text
     r"^单击此处添加(?:备注|标题|副标题|正文)$",
     # Standalone PPT placeholder labels (appear in thumbnail sidebar / master view)
@@ -283,6 +286,8 @@ UI_NOISE_LINE_PATTERNS: list[str] = [
     r"^码操作\.\.\.$",                                 # continuation: "...码操作..."
     # IDE search bar
     r"^Q搜索",                                         # "Q搜索" - IDE/app search box
+    # Keyboard shortcut hints from context menus: "Ctrl+R", "Alt+向左键"
+    r"^(?:Alt|Ctrl|Shift)(?:\+(?:[A-Za-z0-9\[\]]|[一-鿿]{1,4}))*$",
     # Word Protected View banner (multi-line)
     r"^受保护的视图请注意",                             # "受保护的视图请注意..."
     r"^启用编辑[(（]E[)）]",                            # "启用编辑（E)"
@@ -315,7 +320,7 @@ UI_NOISE_LINE_PATTERNS: list[str] = [
     # File list column headers
     r"^(名称|修改日期|类型|大小)\s+(名称|修改日期|类型|大小)",
     # PDF viewer / browser window title with file path
-    r"^[①-⑩]?文件\|(?:C:|D:)?[/\\]Users[/\\]",
+    r"^[①-⑩]?文件\|(?:[A-Z]:)?[/\\]Users[/\\].*",
     # Slash-separated date: "2026/4/13" (different from dash-separated above)
     r"^\d{4}/\d{1,2}/\d{1,2}$",
     # PowerPoint contextual tab label fused with adjacent number: "1文字方向"
