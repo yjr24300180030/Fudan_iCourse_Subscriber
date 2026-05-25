@@ -481,7 +481,7 @@
               <span class="float-right ml-2">▾</span>
             </button>
             <div x-show="subsDeptOpen" class="absolute z-10 mt-1 bg-white border rounded-lg shadow-lg max-h-64 overflow-y-auto min-w-[240px]">
-              <input x-model="deptSearchQuery" @input="rebuildSubsFiltered()" type="text"
+              <input x-model="deptSearchQuery" @input="onDeptSearchInput()" type="text"
                      placeholder="搜索院系…"
                      class="w-full border-b px-3 py-2 text-sm sticky top-0 bg-white focus:outline-none">
               <template x-for="d in subsDeptFiltered" :key="d">
@@ -555,7 +555,10 @@
           <div class="flex-[2] min-w-0 flex flex-col">
             <div class="flex items-center justify-between px-2 py-1.5">
               <h3 class="text-sm font-semibold text-gray-700">搜索结果</h3>
-              <span class="text-xs text-gray-400" x-text="subsFiltered.length + '门'"></span>
+              <span class="text-xs text-gray-400"
+                    x-text="subsFilteredTotal > subsFiltered.length
+                            ? (subsFiltered.length + '/' + subsFilteredTotal + '门')
+                            : (subsFiltered.length + '门')"></span>
             </div>
             <div class="bg-white border border-gray-200 rounded-lg overflow-y-auto max-h-[55vh] divide-y divide-gray-100 flex-1">
               <template x-for="c in subsFiltered" :key="c.course_id + '@' + c.term">
@@ -578,6 +581,11 @@
                 </label>
               </template>
               <p x-show="subsFiltered.length === 0" class="text-center text-gray-400 text-xs py-8">没有匹配的课程</p>
+              <p x-show="subsFilteredTotal > subsFiltered.length"
+                 class="text-center text-gray-400 text-xs py-3 bg-gray-50 border-t border-gray-100">
+                仅显示前 <span x-text="subsFiltered.length"></span> 条（共
+                <span x-text="subsFilteredTotal"></span> 条），请细化搜索条件。
+              </p>
             </div>
           </div>
 

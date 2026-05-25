@@ -209,6 +209,109 @@ function _getAllCoursesTerms() {
   ).map((r) => r.term);
 }
 
+function _buildCatalogWhere(filters) {
+  // Shared WHERE/params builder for paged search + count + dept distinct.
+  // Filters: { terms: string[], depts: string[], title: string, teacher: string }
+  var clauses = [];
+  var params = [];
+  if (filters.terms && filters.terms.length) {
+    clauses.push("term IN (" + filters.terms.map(function () { return "?"; }).join(",") + ")");
+    for (var i = 0; i < filters.terms.length; i++) params.push(filters.terms[i]);
+  }
+  if (filters.depts && filters.depts.length) {
+    clauses.push("dept IN (" + filters.depts.map(function () { return "?"; }).join(",") + ")");
+    for (var j = 0; j < filters.depts.length; j++) params.push(filters.depts[j]);
+  }
+  if (filters.title && filters.title.trim()) {
+    clauses.push("title LIKE ?");
+    params.push("%" + filters.title.trim() + "%");
+  }
+  if (filters.teacher && filters.teacher.trim()) {
+    clauses.push("teacher LIKE ?");
+    params.push("%" + filters.teacher.trim() + "%");
+  }
+  return {
+    where: clauses.length ? "WHERE " + clauses.join(" AND ") : "",
+    params: params,
+  };
+}
+
+function _searchAllCourses(filters, limit) {
+  // Paged catalog search — used by the subscriptions editor middle column.
+  // Pushes all filtering into sqlite so the JS heap never holds the full
+  // 20k-row catalog.
+  var w = _buildCatalogWhere(filters || {});
+  var sql = "SELECT course_id, term, title, teacher, dept FROM all_courses "
+          + w.where + " ORDER BY term DESC, title LIMIT ?";
+  var p = w.params.slice();
+  p.push(limit || 200);
+  return _queryAll(sql, p);
+}
+
+function _countAllCourses(filters) {
+  var w = _buildCatalogWhere(filters || {});
+  var rows = _queryAll("SELECT COUNT(*) AS n FROM all_courses " + w.where, w.params);
+  return rows.length ? rows[0].n : 0;
+}
+
+function _getCoursesByIds(ids) {
+  // Look up the catalog rows for an arbitrary set of course_ids.  Used by
+  // the left ("已订阅") and right ("单次运行") columns so they can render
+  // without holding the full catalog in JS.  Deduplicates by course_id;
+  // a course offered in multiple terms is shown with its most recent term.
+  if (!ids || !ids.length) return [];
+  var placeholders = ids.map(function () { return "?"; }).join(",");
+  // Pull every term row that matches, then collapse to one per course_id
+  // (preferring the most recent term) in JS — keeps the SQL simple.
+  var rows = _queryAll(
+    "SELECT course_id, term, title, teacher, dept FROM all_courses "
+    + "WHERE course_id IN (" + placeholders + ") ORDER BY term DESC",
+    ids.map(String),
+  );
+  var seen = {};
+  var out = [];
+  for (var i = 0; i < rows.length; i++) {
+    var cid = String(rows[i].course_id);
+    if (seen[cid]) continue;
+    seen[cid] = true;
+    out.push(rows[i]);
+  }
+  // Synthesize empty placeholders for IDs the catalog doesn't know about,
+  // so the count shown to the user matches what's actually in their list.
+  var foundIds = {};
+  for (var k = 0; k < out.length; k++) foundIds[String(out[k].course_id)] = true;
+  for (var m = 0; m < ids.length; m++) {
+    var idStr = String(ids[m]);
+    if (!foundIds[idStr]) {
+      out.push({ course_id: idStr, term: "", title: "", teacher: "", dept: "" });
+      foundIds[idStr] = true;
+    }
+  }
+  return out;
+}
+
+function _getAllCoursesDepts(termFilter, search) {
+  // Distinct dept list, optionally narrowed to a set of terms and a
+  // case-insensitive substring search.  Lets the dept dropdown stay
+  // responsive without iterating the JS catalog.
+  var clauses = ["dept IS NOT NULL", "dept != ''"];
+  var params = [];
+  if (termFilter && termFilter.length) {
+    clauses.push("term IN (" + termFilter.map(function () { return "?"; }).join(",") + ")");
+    for (var i = 0; i < termFilter.length; i++) params.push(termFilter[i]);
+  }
+  if (search && search.trim()) {
+    clauses.push("LOWER(dept) LIKE ?");
+    params.push("%" + search.trim().toLowerCase() + "%");
+  }
+  var rows = _queryAll(
+    "SELECT DISTINCT dept FROM all_courses WHERE "
+    + clauses.join(" AND ") + " ORDER BY dept",
+    params,
+  );
+  return rows.map(function (r) { return r.dept; });
+}
+
 function _getSubscribedCourseIds() {
   // The ``courses`` table holds courses we've actually run.  This is our
   // best signal of "currently subscribed" without reading the
@@ -233,6 +336,10 @@ window.ICS.db = {
   searchSummaries: _searchSummaries,
   getAllCourses: _getAllCourses,
   getAllCoursesTerms: _getAllCoursesTerms,
+  searchAllCourses: _searchAllCourses,
+  countAllCourses: _countAllCourses,
+  getCoursesByIds: _getCoursesByIds,
+  getAllCoursesDepts: _getAllCoursesDepts,
   getSubscribedCourseIds: _getSubscribedCourseIds,
   getMeta: _getMeta,
 };

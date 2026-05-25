@@ -252,14 +252,19 @@ document.addEventListener("alpine:init", () => {
     /* Subscriptions editor state — three-column layout:
        left (subscribed) | middle (catalog search) | right (single-run).
        The left column persists to GitHub Secret on demand; the right
-       column is session-only and cleared after triggering a workflow. */
-    allCourses: [], allCoursesTerms: [],
+       column is session-only and cleared after triggering a workflow.
+       Columns are driven by SQL queries against the in-memory shard DB
+       so we never hold the full 20k-row catalog in JS. */
+    allCoursesTerms: [],
     subsTerms: [], subsDepts: [], deptSearchQuery: "",
     subsSearchTitle: "", subsSearchTeacher: "",
     subsTermOpen: false, subsDeptOpen: false,
     subscribedIds: [], singleRunIds: [],
     subsSelLeft: [], subsSelMiddle: [], subsSelRight: [],
-    subsFiltered: [],
+    subsFiltered: [], subsFilteredTotal: 0,
+    subsLimit: 200,
+    _subsSubscribedCache: [], _subsSingleRunCache: [], _subsDeptCache: [],
+    _subsFilterTimer: null, _deptFilterTimer: null,
     subsSaving: false, subsError: "",
     singleRunTriggering: false,
     /* Per-browser pinned-courses set, lazily synced to localStorage. */
@@ -613,13 +618,9 @@ document.addEventListener("alpine:init", () => {
 
     // ── Subscriptions editor (three-column) ──────────────────────────
     openSubscriptions() {
-      // Debug: log entry
-      console.log("openSubscriptions called, view=", this.view);
-      // Enter the page FIRST — before any DB work.
       try {
         this._go("subscriptions");
-        console.log("_go returned, view now=", this.view);
-      } catch(e) {
+      } catch (e) {
         console.error("_go failed:", e);
         return;
       }
@@ -632,13 +633,17 @@ document.addEventListener("alpine:init", () => {
       this.subsSearchTeacher = "";
       this.subsTermOpen = false;
       this.subsDeptOpen = false;
-      this.allCourses = [];
       this.subsFiltered = [];
+      this.subsFilteredTotal = 0;
       this.singleRunIds = [];
       this.subsSelLeft = [];
       this.subsSelMiddle = [];
       this.subsSelRight = [];
+      this._subsSubscribedCache = [];
+      this._subsSingleRunCache = [];
+      this._subsDeptCache = [];
       this.subsError = "";
+
       // Load subscription (localStorage → meta table fallback)
       this.subscribedIds = [];
       try {
@@ -661,45 +666,22 @@ document.addEventListener("alpine:init", () => {
           } catch {}
         }
       }
-      // Background-load the catalog after the page has rendered
-      var self = this;
-      setTimeout(function () { self._loadCoursesForTerms(); }, 200);
+      this._refreshSubscribedCache();
+      this._refreshSingleRunCache();
+      this._refreshDeptCache();
+      this.rebuildSubsFiltered();
     },
-    // ── Async batch-load courses to avoid freezing the UI ───────────
-    _loadCoursesForTerms() {
-      var self = this;
-      var terms = this.subsTerms.length
-        ? this.subsTerms
-        : this.allCoursesTerms;
-
-      var tIdx = 0;
-      var CHUNK = 200;
-      var skipCount = 0;
-
-      function nextTerm() {
-        if (tIdx >= terms.length) return;
-        var rows = ICS.db.getAllCourses(terms[tIdx]);
-        tIdx++;
-        feed(0, rows);
-      }
-
-      function feed(offset, rows) {
-        var sub = rows.slice(offset, offset + CHUNK);
-        self.allCourses = self.allCourses.concat(sub);
-        // Only re-filter every 3 chunks (~600 rows) to reduce DOM churn
-        skipCount++;
-        if (skipCount % 3 === 0) {
-          self.rebuildSubsFiltered();
-        }
-        if (offset + CHUNK >= rows.length) {
-          self.rebuildSubsFiltered();  // Final flush
-          setTimeout(nextTerm, 80);
-        } else {
-          setTimeout(function () { feed(offset + CHUNK, rows); }, 80);
-        }
-      }
-
-      setTimeout(nextTerm, 300);  // Wait 300ms after page render
+    // ── Cache refreshers (called explicitly when underlying IDs change) ─
+    _refreshSubscribedCache() {
+      this._subsSubscribedCache = ICS.db.getCoursesByIds(this.subscribedIds);
+    },
+    _refreshSingleRunCache() {
+      this._subsSingleRunCache = ICS.db.getCoursesByIds(this.singleRunIds);
+    },
+    _refreshDeptCache() {
+      this._subsDeptCache = ICS.db.getAllCoursesDepts(
+        this.subsTerms, this.deptSearchQuery,
+      );
     },
     // ── Term badge color (cyclic palette for the search results) ─────
     _TERM_COLORS: [
@@ -716,15 +698,9 @@ document.addEventListener("alpine:init", () => {
       for (var i = 0; i < term.length; i++) idx = (idx * 31 + term.charCodeAt(i)) | 0;
       return this._TERM_COLORS[Math.abs(idx) % this._TERM_COLORS.length];
     },
-    // ── Column data ─────────────────────────────────────────────────
-    get subscribedCourses() {
-      var ids = new Set(this.subscribedIds.map(String));
-      return this.allCourses.filter(function (c) { return ids.has(String(c.course_id)); });
-    },
-    get singleRunCourses() {
-      var ids = new Set(this.singleRunIds.map(String));
-      return this.allCourses.filter(function (c) { return ids.has(String(c.course_id)); });
-    },
+    // ── Column data (plain arrays kept in sync by cache refreshers) ─
+    get subscribedCourses() { return this._subsSubscribedCache; },
+    get singleRunCourses() { return this._subsSingleRunCache; },
     // ── Dropdown labels ─────────────────────────────────────────────
     get subsTermLabel() {
       if (!this.subsTerms.length) return '全部学期';
@@ -734,21 +710,25 @@ document.addEventListener("alpine:init", () => {
       if (!this.subsDepts.length) return '全部院系';
       return this.subsDepts.length + '个院系';
     },
-    get subsDeptFiltered() {
-      var q = (this.deptSearchQuery || '').toLowerCase();
-      var deptSet = new Set();
-      for (var i = 0; i < this.allCourses.length; i++) {
-        var d = this.allCourses[i].dept;
-        if (d && (!q || d.toLowerCase().indexOf(q) !== -1)) deptSet.add(d);
-      }
-      return Array.from(deptSet).sort();
+    get subsDeptFiltered() { return this._subsDeptCache; },
+    onDeptSearchInput() {
+      // Debounced — typing in the dept search box requeries distinct depts
+      // from sqlite filtered by term + substring.
+      var self = this;
+      clearTimeout(this._deptFilterTimer);
+      this._deptFilterTimer = setTimeout(function () {
+        self._refreshDeptCache();
+      }, 150);
     },
     // ── Toggle multi-select ─────────────────────────────────────────
     toggleSubsTerm(term, checked) {
       var s = new Set(this.subsTerms);
       if (checked) s.add(term); else s.delete(term);
       this.subsTerms = Array.from(s);
-      this._loadCoursesForTerms();
+      // Term change invalidates both the dept dropdown (term-narrowed)
+      // and the middle column (different rows match).
+      this._refreshDeptCache();
+      this.rebuildSubsFiltered();
     },
     toggleSubsDept(dept, checked) {
       var s = new Set(this.subsDepts);
@@ -756,17 +736,20 @@ document.addEventListener("alpine:init", () => {
       this.subsDepts = Array.from(s);
       this.rebuildSubsFiltered();
     },
-    // ── Filter middle column ─────────────────────────────────────────
+    // ── Filter middle column (debounced SQL query) ───────────────────
     rebuildSubsFiltered() {
-      var deptSet = new Set(this.subsDepts.map(function (d) { return d.toLowerCase(); }));
-      var titleQ = (this.subsSearchTitle || "").trim().toLowerCase();
-      var teacherQ = (this.subsSearchTeacher || "").trim().toLowerCase();
-      this.subsFiltered = this.allCourses.filter(function (c) {
-        if (deptSet.size && (!c.dept || !deptSet.has(c.dept.toLowerCase()))) return false;
-        if (titleQ && (!c.title || c.title.toLowerCase().indexOf(titleQ) === -1)) return false;
-        if (teacherQ && (!c.teacher || c.teacher.toLowerCase().indexOf(teacherQ) === -1)) return false;
-        return true;
-      });
+      var self = this;
+      clearTimeout(this._subsFilterTimer);
+      this._subsFilterTimer = setTimeout(function () {
+        var filters = {
+          terms: self.subsTerms,
+          depts: self.subsDepts,
+          title: self.subsSearchTitle,
+          teacher: self.subsSearchTeacher,
+        };
+        self.subsFiltered = ICS.db.searchAllCourses(filters, self.subsLimit);
+        self.subsFilteredTotal = ICS.db.countAllCourses(filters);
+      }, 150);
     },
     // ── Per-column multi-select ──────────────────────────────────────
     _toggleSel(arr, id, checked) {
@@ -791,6 +774,7 @@ document.addEventListener("alpine:init", () => {
       for (var i = 0; i < selected.length; i++) target.add(selected[i]);
       this.subscribedIds = Array.from(target);
       this.subsSelMiddle = [];
+      this._refreshSubscribedCache();
     },
     moveFromSubscribed() {
       var target = new Set(this.subscribedIds.map(String));
@@ -798,6 +782,7 @@ document.addEventListener("alpine:init", () => {
       for (var i = 0; i < selected.length; i++) target.delete(selected[i]);
       this.subscribedIds = Array.from(target);
       this.subsSelLeft = [];
+      this._refreshSubscribedCache();
     },
     moveToSingleRun() {
       var target = new Set(this.singleRunIds.map(String));
@@ -805,6 +790,7 @@ document.addEventListener("alpine:init", () => {
       for (var i = 0; i < selected.length; i++) target.add(selected[i]);
       this.singleRunIds = Array.from(target);
       this.subsSelMiddle = [];
+      this._refreshSingleRunCache();
     },
     moveFromSingleRun() {
       var target = new Set(this.singleRunIds.map(String));
@@ -812,6 +798,7 @@ document.addEventListener("alpine:init", () => {
       for (var i = 0; i < selected.length; i++) target.delete(selected[i]);
       this.singleRunIds = Array.from(target);
       this.subsSelRight = [];
+      this._refreshSingleRunCache();
     },
     // ── Save left column to GitHub Secret ────────────────────────────
     async saveSubscriptions() {
