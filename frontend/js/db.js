@@ -47,6 +47,12 @@ async function _initEmpty() {
   _db.exec(_schemaSql());
 }
 
+function _exportDB() {
+  // Returns the full merged DB as Uint8Array (for caching in IndexedDB).
+  if (!_db) throw new Error("Database not initialized");
+  return _db.export();
+}
+
 function _copyRows(src, dst, table) {
   const result = src.exec(`SELECT * FROM ${table}`);
   if (!result.length || !result[0].values.length) return;
@@ -199,6 +205,7 @@ window.ICS.db = {
   initDB: _initFromBytes,
   initEmpty: _initEmpty,
   attachShard: _attachShard,
+  exportDB: _exportDB,
   getCourses: _getCourses,
   getLectures: _getLectures,
   getLecture: _getLecture,

@@ -160,6 +160,15 @@ async function _fetchAndDecryptIndex(owner, repo, indexSha, password, token) {
 }
 
 async function _loadFromShardManifest(manifest, owner, repo, password, token, progress) {
+  // 0) Check if the full merged DB is already cached for this commit SHA.
+  //    If the data branch hasn't moved, we can skip ALL shard loading.
+  var mergedKey = "merged:" + manifest.commitSha;
+  var cachedMerged = await _idbGet(mergedKey);
+  if (cachedMerged) {
+    await ICS.db.initDB(cachedMerged);
+    return;
+  }
+
   // 1) Load index: check if index SHA matches cached → reuse decrypted JSON;
   //    otherwise fetch + decrypt + cache for next time.
   var cachedIndexSha = null;
@@ -193,6 +202,13 @@ async function _loadFromShardManifest(manifest, owner, repo, password, token, pr
     var shardBytes = await _loadShard(owner, repo, entry, password, token);
     await ICS.db.attachShard(shardBytes);
   }
+
+  // 3) Cache the merged DB in IndexedDB so next load with the same commit
+  //    SHA skips EVERYTHING — no index fetch, no shard iteration, no merge.
+  try {
+    var merged = ICS.db.exportDB();
+    await _idbPut(mergedKey, merged);
+  } catch (e) { /* non-critical — silently skip */ }
 }
 
 async function _loadFromLegacyBlob(manifest, owner, repo, secrets, token) {
