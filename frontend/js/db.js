@@ -73,12 +73,23 @@ async function _attachShard(shardBytes) {
   if (!_db) throw new Error("Database not initialized");
   const SQL = await _ensureSqlJs();
   const shard = new SQL.Database(shardBytes);
+  // Check which tables exist in the shard — the ``meta`` table is new
+  // (added 2026-05) and old shards don't have it.
+  var shardTables = {};
+  try {
+    var tableRows = shard.exec("SELECT name FROM sqlite_master WHERE type='table'");
+    if (tableRows.length && tableRows[0].values) {
+      for (var i = 0; i < tableRows[0].values.length; i++) {
+        shardTables[tableRows[0].values[i][0]] = true;
+      }
+    }
+  } catch (e) { /* old sql.js version — fall through */ }
   try {
     _copyRows(shard, _db, "courses");
     _copyRows(shard, _db, "lectures");
     _copyRows(shard, _db, "ppt_pages");
     _copyRows(shard, _db, "all_courses");
-    _copyRows(shard, _db, "meta");
+    if (shardTables["meta"]) _copyRows(shard, _db, "meta");
   } finally {
     shard.close();
   }

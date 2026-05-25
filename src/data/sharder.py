@@ -312,8 +312,19 @@ def _migrate_shard_schema(target: sqlite3.Connection) -> None:
     to fail with a column-count mismatch.  Adding the missing column
     to the shard before the INSERT makes the ``*`` lists match.
     """
+    # Ensure the ``meta`` table exists on old shards that predate it.
+    meta_exists = target.execute(
+        "SELECT 1 FROM shard.sqlite_master "
+        "WHERE type='table' AND name='meta'"
+    ).fetchone()
+    if not meta_exists:
+        target.execute(
+            "CREATE TABLE IF NOT EXISTS shard.meta "
+            "(key TEXT PRIMARY KEY, value TEXT)"
+        )
+
     # Collect column names per table from main
-    for table in ("lectures", "ppt_pages", "courses", "all_courses"):
+    for table in ("lectures", "ppt_pages", "courses", "all_courses", "meta"):
         main_cols = {
             row[1] for row in target.execute(
                 f"PRAGMA table_info('{table}')"
@@ -402,6 +413,10 @@ def reassemble_database(
                     target.execute(
                         "INSERT OR IGNORE INTO main.all_courses "
                         "SELECT * FROM shard.all_courses"
+                    )
+                    target.execute(
+                        "INSERT OR IGNORE INTO main.meta "
+                        "SELECT * FROM shard.meta"
                     )
                     target.commit()
                 finally:
