@@ -239,7 +239,7 @@ class ICourseClient:
         }
 
     def discover_terms(self, code_min: int = 10,
-                       code_max: int = 30) -> list[dict]:
+                       code_max: int = 35) -> list[dict]:
         """Scan term codes to discover all available semesters.
 
         Returns ``[{code, name, count}]`` sorted by code descending
@@ -265,7 +265,7 @@ class ICourseClient:
 
     def list_semester_courses(self, term: str,
                               per_page: int = 100,
-                              max_pages: int = 60) -> list[dict]:
+                              max_pages: int = 100) -> list[dict]:
         """Walk every page of get-course-list for ``term``.
 
         Returns a flat list of ``{course_id, title, teacher, dept}`` dicts,
