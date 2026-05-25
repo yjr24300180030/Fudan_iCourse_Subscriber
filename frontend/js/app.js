@@ -631,7 +631,7 @@ document.addEventListener("alpine:init", () => {
         if (Array.isArray(cached)) this.subscribedIds = cached.map(String);
       } catch {}
       if (!this.subscribedIds.length) {
-        var metaRaw = ICS.db.getMeta("course_ids");
+        try { var metaRaw = ICS.db.getMeta("course_ids"); } catch (e) { metaRaw = null; }
         if (metaRaw) {
           this.subscribedIds = metaRaw.split(",")
             .map(function (s) { return s.trim(); })

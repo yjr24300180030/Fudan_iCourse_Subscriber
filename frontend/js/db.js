@@ -39,6 +39,8 @@ async function _initFromBytes(dbBytes) {
   const SQL = await _ensureSqlJs();
   _db = dbBytes ? new SQL.Database(dbBytes) : new SQL.Database();
   if (!dbBytes) _db.exec(_schemaSql());
+  // Ensure new tables exist when loading a cached DB from an older version
+  _db.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)");
 }
 
 async function _initEmpty() {

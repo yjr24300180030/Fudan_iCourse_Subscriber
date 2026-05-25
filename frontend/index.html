@@ -450,16 +450,8 @@
 
   <!-- ─── SUBSCRIPTIONS (three-column editor) ─── -->
   <div x-show="view === 'subscriptions'" class="view-enter max-w-5xl mx-auto p-4">
-
-    <!-- Empty catalog message -->
-    <div x-show="allCourses.length === 0"
-         class="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-lg p-4 text-sm leading-relaxed">
-      课程目录为空。等待 workflow 跑一次完整的学期爬取后刷新。
-    </div>
-
-    <template x-if="allCourses.length > 0">
-      <div>
-        <!-- ── Filter bar ── -->
+    <div>
+      <!-- ── Filter bar ── -->
         <div class="flex flex-wrap gap-2 mb-4 items-end">
           <!-- Term multi-select -->
           <div class="relative" @click.away="subsTermOpen = false">
