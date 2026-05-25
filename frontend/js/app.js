@@ -864,6 +864,7 @@ document.addEventListener("alpine:init", () => {
         // Clear the basket
         this.singleRunIds = [];
         this.subsSelRight = [];
+        this._refreshSingleRunCache();
       } catch (e) {
         this.subsError = e?.message || "触发失败";
       } finally {
