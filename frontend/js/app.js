@@ -606,7 +606,9 @@ document.addEventListener("alpine:init", () => {
 
     // ── Subscriptions editor (three-column) ──────────────────────────
     openSubscriptions() {
-      // Minimal synchronous work — enter the page immediately.
+      // Enter the page FIRST — before any DB work.
+      this._go("subscriptions");
+
       this.allCoursesTerms = ICS.db.getAllCoursesTerms();
       this.subsTerms = [];
       this.subsDepts = [];
@@ -644,7 +646,6 @@ document.addEventListener("alpine:init", () => {
           } catch {}
         }
       }
-      this.navigate("subscriptions");
       // Background-load the catalog after the page has rendered
       var self = this;
       setTimeout(function () { self._loadCoursesForTerms(); }, 200);
