@@ -430,26 +430,31 @@
           <input x-model="searchCourseFilterQuery" type="text"
                  placeholder="搜索课程名…"
                  class="w-full border-b px-3 py-2 text-sm sticky top-0 bg-white focus:outline-none">
-          <div class="border-b px-3 py-2 space-y-1">
-            <p class="text-xs text-gray-400 mb-1">搜索范围</p>
-            <label class="flex items-center gap-2 text-sm cursor-pointer">
-              <input type="checkbox" :checked="searchDomains.summary"
-                     @change="toggleSearchDomain('summary')"
-                     class="rounded border-gray-300 text-blue-600">
-              <span>摘要</span>
-            </label>
-            <label class="flex items-center gap-2 text-sm cursor-pointer">
-              <input type="checkbox" :checked="searchDomains.transcript"
-                     @change="toggleSearchDomain('transcript')"
-                     class="rounded border-gray-300 text-blue-600">
-              <span>转录</span>
-            </label>
-            <label class="flex items-center gap-2 text-sm cursor-pointer">
-              <input type="checkbox" :checked="searchDomains.ocr"
-                     @change="toggleSearchDomain('ocr')"
-                     class="rounded border-gray-300 text-blue-600">
-              <span>OCR</span>
-            </label>
+          <div class="border-b px-3 py-2">
+            <p class="text-xs text-gray-400 mb-1.5">搜索范围</p>
+            <div class="flex flex-wrap gap-1.5">
+              <button @click="toggleSearchDomain('summary')" type="button"
+                      class="text-xs px-3 py-1 rounded-full font-medium transition-colors"
+                      :class="searchDomains.summary
+                        ? 'bg-blue-100 text-blue-700'
+                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200'">
+                摘要
+              </button>
+              <button @click="toggleSearchDomain('transcript')" type="button"
+                      class="text-xs px-3 py-1 rounded-full font-medium transition-colors"
+                      :class="searchDomains.transcript
+                        ? 'bg-blue-100 text-blue-700'
+                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200'">
+                转录
+              </button>
+              <button @click="toggleSearchDomain('ocr')" type="button"
+                      class="text-xs px-3 py-1 rounded-full font-medium transition-colors"
+                      :class="searchDomains.ocr
+                        ? 'bg-blue-100 text-blue-700'
+                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200'">
+                OCR
+              </button>
+            </div>
           </div>
           <template x-for="c in searchCourseOptionsFiltered" :key="c.course_id">
             <label class="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 text-sm cursor-pointer">
