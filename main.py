@@ -280,6 +280,9 @@ def run():
         # Fall through — crawl-only mode is valid.
 
     db = Database()
+    corrected = db.sync_dates_from_sub()
+    if corrected:
+        print(f"  [Date] Synced {corrected} lecture date(s) from sub_title", flush=True)
     transcriber = Transcriber()
     summarizer = Summarizer() if config.COURSE_IDS else None
     emailer = Emailer() if (

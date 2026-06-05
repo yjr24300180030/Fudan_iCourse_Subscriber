@@ -7,6 +7,7 @@ and video downloads through WebVPN.
 
 import hashlib
 import os
+import re
 import time
 import uuid
 from urllib.parse import urlparse
@@ -14,6 +15,16 @@ from urllib.parse import urlparse
 from src.runtime import config
 from src.api.webvpn import WebVPNSession, get_vpn_url
 
+
+_DATE_FROM_SUB_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})")
+
+
+def _extract_date_from_sub(sub_title: str) -> str | None:
+    """Extract YYYY-MM-DD from a sub_title like "2026-03-05第6-8节"."""
+    if not sub_title:
+        return None
+    m = _DATE_FROM_SUB_RE.match(sub_title)
+    return m.group(1) if m else None
 
 def fetch_ppt_image(client: "ICourseClient", item: dict,
                     max_attempts: int = 2, timeout: int = 30) -> bytes | None:
@@ -134,14 +145,22 @@ class ICourseClient:
                 for day, items in days.items():
                     for item in items:
                         if "id" in item:
+                            sub_title = item.get("sub_title", "")
+                            # Real lecture date is embedded in sub_title
+                            # ("2026-03-05第6-8节" → "2026-03-05"); fall back
+                            # to the server's year/month/day keys if missing.
+                            date = (
+                                _extract_date_from_sub(sub_title)
+                                or f"{year}-{month}-{day}"
+                            )
                             lectures.append(
                                 {
                                     "sub_id": item["id"],
-                                    "sub_title": item.get("sub_title", ""),
+                                    "sub_title": sub_title,
                                     "lecturer_name": item.get(
                                         "lecturer_name", ""
                                     ),
-                                    "date": f"{year}-{month}-{day}",
+                                    "date": date,
                                     "has_playback": str(item.get("playback_status")) == "1",
                                 }
                             )
