@@ -400,16 +400,18 @@ class Database:
         return [dict(row) for row in rows]
 
     def sync_dates_from_sub(self) -> int:
-        """Fix existing date rows where sub_title date differs from date column.
+        """Fix date rows where the stored value is wrong or badly formatted.
 
         sub_title format is "2026-03-05第6-8节"; the embedded date is the
-        real class date. Returns number of rows corrected.
+        real class date.  Also corrects zero-padding so that SQLite ORDER BY
+        date works correctly (e.g. "2026-3-2" → "2026-03-02").
+        Returns number of rows corrected.
         """
         with self.conn:
             cur = self.conn.execute(r"""
                 UPDATE lectures
                 SET date = substr(sub_title, 1, 10)
                 WHERE sub_title GLOB '????-??-??*'
-                  AND substr(sub_title, 1, 10) != date
+                  AND date != substr(sub_title, 1, 10)
             """)
             return cur.rowcount or 0

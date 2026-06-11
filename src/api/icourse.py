@@ -149,9 +149,10 @@ class ICourseClient:
                             # Real lecture date is embedded in sub_title
                             # ("2026-03-05第6-8节" → "2026-03-05"); fall back
                             # to the server's year/month/day keys if missing.
+                            # Zero-pad the fallback so SQLite ORDER BY works.
                             date = (
                                 _extract_date_from_sub(sub_title)
-                                or f"{year}-{month}-{day}"
+                                or f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
                             )
                             lectures.append(
                                 {
