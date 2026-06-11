@@ -173,15 +173,26 @@ class LectureRunner:
         # semaphore until a download slot frees.
         self._scheduler.prefetch_lecture(self._client, next_course, next_sub)
 
+    @staticmethod
+    def _official_transcript_usable(segments: list[dict] | None,
+                                    max_gap_minutes: int = 20) -> bool:
+        """True if the official transcript is complete enough to use."""
+        if not segments:
+            return False
+        max_gap_s = 0
+        for i in range(1, len(segments)):
+            gap = segments[i]["start_ms"] - segments[i - 1]["end_ms"]
+            if gap > max_gap_s:
+                max_gap_s = gap
+        return max_gap_s <= max_gap_minutes * 60_000
+
     def _get_transcript(self, existing: dict | None, course_id: str,
                         sub_id: str) -> tuple[Optional[str], Optional[list]]:
         """Return (transcript, segments) or (None, None) on skip.
 
-        Reuses an existing transcript if present (segments==None — bucketer
-        falls back to flat mode).  Otherwise pulls the prefetched audio
-        handle, runs ``transcribe_tail``, and writes the transcript.  On
-        ``NoAudioStreamError`` returns (None, None) after marking the
-        lecture as a deliberate skip.
+        Tries the official iCourse transcript first — when available and
+        complete-enough (no >20 min silence gaps) it replaces the ASR
+        step entirely, saving ~5 min of CPU time per lecture.
         """
         if existing and existing.get("transcript"):
             self._reporter.info(
@@ -190,6 +201,20 @@ class LectureRunner:
                 f"skipping transcription."
             )
             return existing["transcript"], None
+
+        # Try official transcript before firing up ASR.
+        try:
+            official = self._client.get_transcript_segments(sub_id)
+            if self._official_transcript_usable(official):
+                text = " ".join(s["text"] for s in official)
+                self._reporter.info(
+                    f"    Using official transcript "
+                    f"({len(text)} chars, {len(official)} segments)"
+                )
+                self._db.update_transcript(sub_id, text)
+                return text, official
+        except Exception:
+            pass  # fall through to ASR
 
         # Pull the audio handle.  ``schedule`` is idempotent — usually the
         # previous lecture already kicked it off (Phase C), but for the

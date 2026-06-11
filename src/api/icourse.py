@@ -362,10 +362,24 @@ class ICourseClient:
         )
 
     def get_transcript(self, sub_id: str) -> str | None:
-        """Get the transcript text for a lecture.
+        """Get the transcript text for a lecture (flat string).
 
         Returns the full transcript text, empty string if no transcript,
         or None on error.
+        """
+        segments = self.get_transcript_segments(sub_id)
+        if segments is None:
+            return None
+        if not segments:
+            return ""
+        return " ".join(s["text"] for s in segments if s["text"])
+
+    def get_transcript_segments(self, sub_id: str) -> list[dict] | None:
+        """Get transcript as timed segments.  Returns None on API error,
+        empty list if no transcript exists.
+
+        Each segment: {"start_ms": int, "end_ms": int, "text": str}
+        Sorted by start_ms ascending.
         """
         url = f"{self.base_url}/courseapi/v3/web-socket/search-trans-result"
         resp = self.vpn.get(
@@ -379,15 +393,23 @@ class ICourseClient:
 
         result_list = data.get("list", [])
         if not result_list:
-            return ""
+            return []
 
         all_content = result_list[0].get("all_content", [])
         if not all_content:
-            return ""
+            return []
 
-        all_content.sort(key=lambda x: x.get("BeginSec", 0))
-        return " ".join(
-            seg.get("Text", "") for seg in all_content if seg.get("Text")
+        return sorted(
+            (
+                {
+                    "start_ms": int(seg.get("BeginSec", 0)) * 1000,
+                    "end_ms": int(seg.get("EndSec", seg.get("BeginSec", 0))) * 1000,
+                    "text": seg.get("Text", ""),
+                }
+                for seg in all_content
+                if seg.get("Text", "").strip()
+            ),
+            key=lambda s: s["start_ms"],
         )
 
     def get_sub_detail(self, course_id: str, sub_id: str) -> dict:
