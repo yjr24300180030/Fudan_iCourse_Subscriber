@@ -108,6 +108,11 @@ class LectureRunner:
         )
         if transcript is None:
             # _get_transcript already logged + persisted the skip reason.
+            # Still drain the PPT handle: with defer_ocr the OCR jobs are
+            # only submitted at drain() time, so skipping it would leave
+            # the pages 'pending' forever and force the retry run to redo
+            # download + dedup from scratch.
+            ppt_handle.drain()
             return None
 
         # ── Phase E — drain remaining OCR work ─────────────────────────
@@ -225,10 +230,13 @@ class LectureRunner:
             return None, None
         if handle is None:
             # AudioDownloader returns None when get_video_url() returned
-            # None — i.e. the lecture has no playable video.
+            # None — i.e. the lecture has no playable video.  Record an
+            # error so the lecture is retried (the video may appear later)
+            # but abandoned after max_errors instead of every day forever.
             self._reporter.lecture_skip_no_video(
                 existing.get("sub_title", sub_id) if existing else sub_id
             )
+            self._db.update_error(sub_id, "transcribe", "no playable video URL")
             return None, None
 
         try:
