@@ -137,12 +137,17 @@ async function _attachShard(shardBytes) {
 }
 
 function _deriveState(row) {
+  // "no_video" is a soft error stage the backend records when the lecture
+  // has no playable video yet (it retries a few runs in case the recording
+  // appears later).  Render it as a gray informational badge, not a red
+  // failure.
+  if (row.error_stage === "no_video") return "novideo";
   if (row.error_stage) return "failed";
   if (row.summary && row.processed_at) return "ready";
   // Processed, no summary, no error = a lecture the backend permanently
-  // skipped (no playable video / no audio stream / empty transcript) and
-  // marked done. Distinct from "waiting" (enqueued, not yet run) so these
-  // don't show as perpetually pending in the UI.
+  // skipped (no audio stream / empty transcript) and marked done.
+  // Distinct from "waiting" (enqueued, not yet run) so these don't show
+  // as perpetually pending in the UI.
   if (row.processed_at) return "skipped";
   if (row.transcript) return "processing";
   return "waiting";

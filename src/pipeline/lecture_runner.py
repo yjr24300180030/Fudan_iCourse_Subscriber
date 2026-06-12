@@ -309,10 +309,12 @@ class LectureRunner:
             # None — i.e. the lecture has no playable video.  Record an
             # error so the lecture is retried (the video may appear later)
             # but abandoned after max_errors instead of every day forever.
+            # The "no_video" stage is a contract with the frontend, which
+            # renders it as a gray "无视频" hint instead of a red failure.
             self._reporter.lecture_skip_no_video(
                 existing.get("sub_title", sub_id) if existing else sub_id
             )
-            self._db.update_error(sub_id, "transcribe", "no playable video URL")
+            self._db.update_error(sub_id, "no_video", "no playable video URL")
             return None, None
 
         try:
